@@ -19,8 +19,35 @@ import matplotlib.pyplot as plt
 # Simulation des modules de calcul
 class SimulationCalculs:
     @staticmethod
-    def analyser_dalot(longueur, largeur, hauteur, epaisseur_mur, epaisseur_dalle):
+    def analyser_dalot(longueur, largeur, hauteur, epaisseur_mur, epaisseur_dalle, params=None):
+        """Analyse du dalot avec paramètres personnalisables"""
         try:
+            # Paramètres par défaut si non fournis
+            if params is None:
+                params = {}
+            
+            # Récupération des paramètres utilisateur ou valeurs par défaut
+            gamma_beton = 25.0  # kN/m³
+            gamma_sol = params.get('sol_gamma_kN_m3', 20.0)
+            phi_deg = params.get('sol_phi_deg', 30.0)
+            c_kPa = params.get('sol_c_kPa', 0.0)
+            q_trafic = params.get('q_trafic_kN_m2', 5.0)
+            q_perm_supp = params.get('q_perm_supp_kN_m2', 2.0)
+            gamma_G = params.get('gamma_G', 1.35)
+            gamma_Q = params.get('gamma_Q', 1.5)
+            
+            # Matériaux (avec surcharges possibles)
+            fck = float(params.get('fck_MPa') or '30')
+            gamma_c = params.get('gamma_c', 1.5)
+            alpha_cc = params.get('alpha_cc', 1.0)
+            fcd = alpha_cc * fck / gamma_c
+            
+            fyk = float(params.get('fyk_MPa') or '500')
+            gamma_s = params.get('gamma_s', 1.15)
+            fyd = fyk / gamma_s
+            
+            enrobage = float(params.get('enrob_mm') or '30') / 1000  # Convert mm to m
+            
             vol_dalle_fond = longueur * largeur * epaisseur_dalle
             vol_dalle_couverture = longueur * largeur * epaisseur_dalle
             vol_murs = 2 * longueur * epaisseur_mur * (hauteur - 2*epaisseur_dalle)
@@ -29,25 +56,44 @@ class SimulationCalculs:
             densite_beton = 2500
             masse_totale = vol_total * densite_beton
             
-            q_pp_dalle = epaisseur_dalle * 25000
-            q_exploitation = 5000
-            q_permanente_supp = 2000
-            q_service = q_pp_dalle + q_exploitation + q_permanente_supp
-            q_ELU = 1.35 * (q_pp_dalle + q_permanente_supp) + 1.5 * q_exploitation
+            q_pp_dalle = epaisseur_dalle * gamma_beton * 1000  # Convert to N/m²
+            q_service = q_pp_dalle + q_perm_supp * 1000 + q_trafic * 1000  # All in N/m²
+            q_ELU = gamma_G * (q_pp_dalle + q_perm_supp * 1000) + gamma_Q * q_trafic * 1000
             
-            gamma_terre = 20000
-            Ka = 0.33
-            sigma_h_base = Ka * gamma_terre * hauteur
-            force_poussee = 0.5 * sigma_h_base * hauteur
-            point_application = hauteur / 3
+            # Coefficients de poussée des terres
+            phi_rad = np.radians(phi_deg)
+            
+            # Surcharges manuelles ou calcul automatique
+            Ka_manuel = params.get('sol_Ka_manuel', '')
+            K0_manuel = params.get('sol_K0_manuel', '')
+            
+            if Ka_manuel and Ka_manuel.strip():
+                Ka = float(Ka_manuel)
+            else:
+                Ka = np.tan(np.pi/4 - phi_rad/2)**2  # Formule de Rankine
+                
+            if K0_manuel and K0_manuel.strip():
+                K0 = float(K0_manuel)
+            else:
+                K0 = 1 - np.sin(phi_rad)  # Formule de Jaky
+            
+            # Pression latérale avec surcharge de surface
+            sigma_h_base = Ka * gamma_sol * 1000 * hauteur + Ka * q_trafic * 1000  # N/m²
+            force_poussee = 0.5 * Ka * gamma_sol * 1000 * hauteur**2 + Ka * q_trafic * 1000 * hauteur  # N/m
+            
+            # Point d'application (moment d'équilibre)
+            if q_trafic > 0:
+                M_triangulaire = (Ka * gamma_sol * 1000 * hauteur**2 / 2) * (hauteur / 3)
+                M_rectangulaire = (Ka * q_trafic * 1000 * hauteur) * (hauteur / 2)
+                point_application = (M_triangulaire + M_rectangulaire) / force_poussee
+            else:
+                point_application = hauteur / 3
             
             effort_normal_mur = q_service * largeur / 2
             moment_ELU_dalle = q_ELU * largeur**2 / 8
             
-            fck = 30
-            fyd = 435
-            d = epaisseur_dalle - 0.05
-            mu = moment_ELU_dalle / (largeur * fck * 1e6 * d**2)
+            d = epaisseur_dalle - enrobage
+            mu = moment_ELU_dalle / (largeur * fcd * 1e6 * d**2)
             
             if mu < 0.372:
                 alpha = 1.25 * (1 - np.sqrt(1 - 2*mu))
@@ -61,6 +107,20 @@ class SimulationCalculs:
             
             return {
                 'validation_ok': True,
+                'parametres': {
+                    'gamma_sol_kN_m3': gamma_sol,
+                    'phi_deg': phi_deg,
+                    'c_kPa': c_kPa,
+                    'Ka': Ka,
+                    'K0': K0,
+                    'fck_MPa': fck,
+                    'fcd_MPa': fcd,
+                    'fyk_MPa': fyk,
+                    'fyd_MPa': fyd,
+                    'gamma_G': gamma_G,
+                    'gamma_Q': gamma_Q,
+                    'enrobage_mm': enrobage * 1000
+                },
                 'volumes_masses': {
                     'dalle_fond': {'volume': vol_dalle_fond, 'masse': vol_dalle_fond * densite_beton, 'info': 'Dalle de fond'},
                     'dalle_couverture': {'volume': vol_dalle_couverture, 'masse': vol_dalle_couverture * densite_beton, 'info': 'Dalle de couverture'},
@@ -68,16 +128,18 @@ class SimulationCalculs:
                     'total': {'volume': vol_total, 'masse': masse_totale, 'info': 'Total dalot'}
                 },
                 'charges_dalle_couverture': {
-                    'q_pp_dalle': q_pp_dalle, 'q_exploitation': q_exploitation,
-                    'q_permanente_supp': q_permanente_supp, 'q_service': q_service, 'q_ELU': q_ELU
+                    'q_pp_dalle': q_pp_dalle, 'q_trafic': q_trafic * 1000,
+                    'q_permanente_supp': q_perm_supp * 1000, 'q_service': q_service, 'q_ELU': q_ELU
                 },
                 'poussee_terres': {
                     'sigma_h_base': sigma_h_base, 'force_poussee_par_metre': force_poussee,
-                    'point_application_hauteur': point_application
+                    'point_application_hauteur': point_application,
+                    'formule_Ka': 'Rankine' if not (Ka_manuel and Ka_manuel.strip()) else 'Manuel',
+                    'formule_K0': 'Jaky' if not (K0_manuel and K0_manuel.strip()) else 'Manuel'
                 },
                 'effort_normal_mur': {'valeur': effort_normal_mur, 'info': 'Effort normal dû aux charges verticales'},
                 'ferraillage_dalle_couverture': {
-                    'moment_ELU': moment_ELU_dalle, 'As_theorique': As_theorique,
+                    'moment_ELU': moment_ELU_dalle, 'As_theorique': As_theorique, 'd_m': d,
                     'resultat': 'Ferraillage calculé', 'info': 'Calcul selon Eurocode 2'
                 },
                 'armatures_dalle_choisies': armatures_dalle,
@@ -235,6 +297,42 @@ class ApplicationDalotComplete(tk.Tk):
         self.afficher_legendes = tk.BooleanVar(value=True)
         self.afficher_cotes = tk.BooleanVar(value=True)
         self.afficher_armatures = tk.BooleanVar(value=False)
+        
+        # Murs en aile
+        self.aile_g_active = tk.BooleanVar(value=False)
+        self.aile_d_active = tk.BooleanVar(value=False)
+        self.aile_g_angle_deg = tk.DoubleVar(value=90.0)
+        self.aile_d_angle_deg = tk.DoubleVar(value=90.0)
+        self.aile_g_long_m = tk.DoubleVar(value=2.0)
+        self.aile_d_long_m = tk.DoubleVar(value=2.0)
+        self.aile_g_ep_m = tk.DoubleVar(value=0.25)
+        self.aile_d_ep_m = tk.DoubleVar(value=0.25)
+        self.aile_g_fruit_vh = tk.DoubleVar(value=0.0)
+        self.aile_d_fruit_vh = tk.DoubleVar(value=0.0)
+        self.aile_g_offset_m = tk.DoubleVar(value=0.0)
+        self.aile_d_offset_m = tk.DoubleVar(value=0.0)
+        
+        # Paramètres sol et charges avancés
+        self.sol_gamma_kN_m3 = tk.DoubleVar(value=20.0)
+        self.sol_phi_deg = tk.DoubleVar(value=30.0)
+        self.sol_c_kPa = tk.DoubleVar(value=0.0)
+        self.sol_Ka_manuel = tk.StringVar(value="")  # Vide = calculé automatiquement
+        self.sol_K0_manuel = tk.StringVar(value="")  # Vide = calculé automatiquement
+        self.q_trafic_kN_m2 = tk.DoubleVar(value=5.0)
+        self.q_perm_supp_kN_m2 = tk.DoubleVar(value=2.0)
+        self.gamma_G = tk.DoubleVar(value=1.35)
+        self.gamma_Q = tk.DoubleVar(value=1.5)
+        self.psi0 = tk.DoubleVar(value=0.7)
+        
+        # Matériaux avancés (surcharges manuelles)
+        self.fck_MPa = tk.StringVar(value="")  # Vide = utilise la classe
+        self.gamma_c = tk.DoubleVar(value=1.5)
+        self.alpha_cc = tk.DoubleVar(value=1.0)
+        self.fyk_MPa = tk.StringVar(value="")  # Vide = utilise la classe  
+        self.gamma_s = tk.DoubleVar(value=1.15)
+        self.Es_MPa = tk.StringVar(value="")  # Vide = utilise la classe
+        self.enrob_mm = tk.StringVar(value="")  # Vide = utilise la classe d'exposition
+        self.wk_mm = tk.StringVar(value="")  # Vide = pas de vérification fissuration
 
     def _creer_interface(self):
         self._creer_menus()
@@ -375,6 +473,55 @@ class ApplicationDalotComplete(tk.Tk):
         self._creer_combo_avec_unite(grp_ep, "Voiles latéraux:", self.epaisseur_voile_lat_m, 2, 
                                      DonneesNormalisees.EPAISSEURS_VOILE, "m", "Épaisseur des murs latéraux")
 
+        # Groupe Murs en aile
+        grp_ailes = ttk.LabelFrame(cadre, text="Murs en aile")
+        grp_ailes.pack(fill="x", padx=10, pady=10)
+
+        # Aile gauche
+        ttk.Label(grp_ailes, text="Aile gauche:", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", padx=5, pady=2)
+        ttk.Checkbutton(grp_ailes, text="Activer", variable=self.aile_g_active, 
+                       command=self._dessiner_dalot_3d).grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        
+        ttk.Label(grp_ailes, text="Angle (°):").grid(row=1, column=1, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_g_angle_deg, width=8).grid(row=1, column=2, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Longueur (m):").grid(row=2, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_g_long_m, width=8).grid(row=2, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Épaisseur (m):").grid(row=2, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_g_ep_m, width=8).grid(row=2, column=3, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Fruit V/H:").grid(row=3, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_g_fruit_vh, width=8).grid(row=3, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Décalage tête (m):").grid(row=3, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_g_offset_m, width=8).grid(row=3, column=3, sticky="w", padx=2, pady=2)
+
+        # Aile droite  
+        ttk.Label(grp_ailes, text="Aile droite:", font=("TkDefaultFont", 9, "bold")).grid(row=4, column=0, columnspan=4, sticky="w", padx=5, pady=(10,2))
+        ttk.Checkbutton(grp_ailes, text="Activer", variable=self.aile_d_active,
+                       command=self._dessiner_dalot_3d).grid(row=5, column=0, sticky="w", padx=5, pady=2)
+        
+        ttk.Label(grp_ailes, text="Angle (°):").grid(row=5, column=1, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_d_angle_deg, width=8).grid(row=5, column=2, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Longueur (m):").grid(row=6, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_d_long_m, width=8).grid(row=6, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Épaisseur (m):").grid(row=6, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_d_ep_m, width=8).grid(row=6, column=3, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Fruit V/H:").grid(row=7, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_d_fruit_vh, width=8).grid(row=7, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_ailes, text="Décalage tête (m):").grid(row=7, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_ailes, textvariable=self.aile_d_offset_m, width=8).grid(row=7, column=3, sticky="w", padx=2, pady=2)
+
+        # Bind events pour actualisation 3D
+        for var in [self.aile_g_angle_deg, self.aile_g_long_m, self.aile_g_ep_m, self.aile_g_fruit_vh, self.aile_g_offset_m,
+                   self.aile_d_angle_deg, self.aile_d_long_m, self.aile_d_ep_m, self.aile_d_fruit_vh, self.aile_d_offset_m]:
+            var.trace('w', lambda *args: self.after(500, self._dessiner_dalot_3d))
+
     def _onglet_materiaux(self):
         cadre = ttk.Frame(self.notebook_parametres)
         self.notebook_parametres.add(cadre, text="🧱 Matériaux")
@@ -392,6 +539,22 @@ class ApplicationDalotComplete(tk.Tk):
         self.info_beton = ttk.Label(grp_beton, text="", foreground="blue")
         self.info_beton.grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=2)
         self._maj_info_beton()
+        
+        # Surcharges manuelles béton
+        ttk.Label(grp_beton, text="Surcharges manuelles (laisser vide pour utiliser la classe):", 
+                 font=("TkDefaultFont", 8, "italic")).grid(row=2, column=0, columnspan=3, sticky="w", padx=5, pady=(5,0))
+        
+        ttk.Label(grp_beton, text="fck (MPa):").grid(row=3, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_beton, textvariable=self.fck_MPa, width=8).grid(row=3, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_beton, text="γc:").grid(row=3, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_beton, textvariable=self.gamma_c, width=8).grid(row=3, column=3, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_beton, text="αcc:").grid(row=4, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_beton, textvariable=self.alpha_cc, width=8).grid(row=4, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_beton, text="Enrobage (mm):").grid(row=4, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_beton, textvariable=self.enrob_mm, width=8).grid(row=4, column=3, sticky="w", padx=2, pady=2)
 
         # Acier
         grp_acier = ttk.LabelFrame(cadre, text="Caractéristiques de l'acier")
@@ -406,6 +569,22 @@ class ApplicationDalotComplete(tk.Tk):
         self.info_acier = ttk.Label(grp_acier, text="", foreground="blue")
         self.info_acier.grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=2)
         self._maj_info_acier()
+        
+        # Surcharges manuelles acier
+        ttk.Label(grp_acier, text="Surcharges manuelles (laisser vide pour utiliser la classe):",
+                 font=("TkDefaultFont", 8, "italic")).grid(row=2, column=0, columnspan=4, sticky="w", padx=5, pady=(5,0))
+        
+        ttk.Label(grp_acier, text="fyk (MPa):").grid(row=3, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_acier, textvariable=self.fyk_MPa, width=8).grid(row=3, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_acier, text="γs:").grid(row=3, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_acier, textvariable=self.gamma_s, width=8).grid(row=3, column=3, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_acier, text="Es (MPa):").grid(row=4, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_acier, textvariable=self.Es_MPa, width=8).grid(row=4, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_acier, text="wk (mm):").grid(row=4, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_acier, textvariable=self.wk_mm, width=8).grid(row=4, column=3, sticky="w", padx=2, pady=2)
 
         # Exposition
         grp_expo = ttk.LabelFrame(cadre, text="Classe d'exposition (enrobage)")
@@ -455,6 +634,47 @@ class ApplicationDalotComplete(tk.Tk):
         self.info_remblai = ttk.Label(grp_remblai, text="", foreground="blue")
         self.info_remblai.grid(row=2, column=0, columnspan=3, sticky="w", padx=5, pady=2)
         self._maj_info_remblai()
+
+        # Groupe Propriétés du sol
+        grp_sol = ttk.LabelFrame(cadre, text="Propriétés du sol (paramètres libres)")
+        grp_sol.pack(fill="x", padx=10, pady=10)
+        
+        ttk.Label(grp_sol, text="Poids volumique γsol (kN/m³):").grid(row=0, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_sol, textvariable=self.sol_gamma_kN_m3, width=8).grid(row=0, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_sol, text="Angle de frottement φ (°):").grid(row=0, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_sol, textvariable=self.sol_phi_deg, width=8).grid(row=0, column=3, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_sol, text="Cohésion c (kPa):").grid(row=1, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_sol, textvariable=self.sol_c_kPa, width=8).grid(row=1, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_sol, text="Ka manuel (facultatif):").grid(row=2, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_sol, textvariable=self.sol_Ka_manuel, width=8).grid(row=2, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_sol, text="K0 manuel (facultatif):").grid(row=2, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_sol, textvariable=self.sol_K0_manuel, width=8).grid(row=2, column=3, sticky="w", padx=2, pady=2)
+
+        # Groupe Charges supplémentaires
+        grp_charges_supp = ttk.LabelFrame(cadre, text="Charges supplémentaires et combinaisons")
+        grp_charges_supp.pack(fill="x", padx=10, pady=10)
+        
+        ttk.Label(grp_charges_supp, text="Surcharge trafic q (kN/m²):").grid(row=0, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_charges_supp, textvariable=self.q_trafic_kN_m2, width=8).grid(row=0, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_charges_supp, text="Surcharge perm. supp. (kN/m²):").grid(row=0, column=2, sticky="e", padx=5, pady=2)  
+        ttk.Entry(grp_charges_supp, textvariable=self.q_perm_supp_kN_m2, width=8).grid(row=0, column=3, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_charges_supp, text="Facteurs de combinaison:", 
+                 font=("TkDefaultFont", 9, "bold")).grid(row=1, column=0, columnspan=4, sticky="w", padx=5, pady=(10,2))
+                 
+        ttk.Label(grp_charges_supp, text="γG:").grid(row=2, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_charges_supp, textvariable=self.gamma_G, width=6).grid(row=2, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_charges_supp, text="γQ:").grid(row=2, column=2, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_charges_supp, textvariable=self.gamma_Q, width=6).grid(row=2, column=3, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(grp_charges_supp, text="ψ0:").grid(row=3, column=0, sticky="e", padx=5, pady=2)
+        ttk.Entry(grp_charges_supp, textvariable=self.psi0, width=6).grid(row=3, column=1, sticky="w", padx=2, pady=2)
 
     def _creer_onglet_resultats(self):
         cadre_resultats = ttk.Frame(self.notebook_gauche)
@@ -655,21 +875,29 @@ class ApplicationDalotComplete(tk.Tk):
             # Ouvertures avec meilleur style
             self._dessiner_ouvertures(L, l, h, e_mur, e_dalle_inf, e_dalle_sup)
             
+            # Dessiner les murs en aile
+            max_wing_length = 0
+            if self.aile_g_active.get():
+                max_wing_length = max(max_wing_length, self._dessiner_mur_en_aile('gauche', L, l, h, e_dalle_inf, e_dalle_sup))
+            if self.aile_d_active.get():
+                max_wing_length = max(max_wing_length, self._dessiner_mur_en_aile('droite', L, l, h, e_dalle_inf, e_dalle_sup))
+            
             # Configuration avancée
             self.ax_3d.set_xlabel('Longueur (m)', fontweight='bold')
             self.ax_3d.set_ylabel('Largeur (m)', fontweight='bold')
             self.ax_3d.set_zlabel('Hauteur (m)', fontweight='bold')
             self.ax_3d.set_title(f'🏗️ Dalot 3D - L:{L:.1f}m × l:{l:.1f}m × H:{h:.1f}m', fontsize=14, fontweight='bold')
             
-            # Limites optimisées
+            # Limites optimisées (prendre en compte les ailes)
             margin = 0.15
+            y_max = max(l, max_wing_length) if max_wing_length > 0 else l
             self.ax_3d.set_xlim(-L*margin, L*(1+margin))
-            self.ax_3d.set_ylim(-l*margin, l*(1+margin))
+            self.ax_3d.set_ylim(-y_max*margin, y_max*(1+margin))
             self.ax_3d.set_zlim(0, h*(1+margin))
             
             # Proportions correctes
-            max_dim = max(L, l, h)
-            self.ax_3d.set_box_aspect([L/max_dim, l/max_dim, h/max_dim])
+            max_dim = max(L, y_max, h)
+            self.ax_3d.set_box_aspect([L/max_dim, y_max/max_dim, h/max_dim])
             
             # Grille et style
             self.ax_3d.grid(True, alpha=0.3)
@@ -752,6 +980,108 @@ class ApplicationDalotComplete(tk.Tk):
             self.ax_3d.quiver(-L*0.1, l/2, (h/2), L*0.08, 0, 0, color='red', alpha=0.8, arrow_length_ratio=0.3)
             # Flèche sortie
             self.ax_3d.quiver(L*1.02, l/2, (h/2), L*0.08, 0, 0, color='green', alpha=0.8, arrow_length_ratio=0.3)
+
+    def _dessiner_mur_en_aile(self, cote, L, l, h, e_dalle_inf, e_dalle_sup):
+        """Dessine un mur en aile à la tête x=0 avec paramètres géométriques"""
+        
+        if cote == 'gauche':
+            active = self.aile_g_active.get()
+            angle_deg = self.aile_g_angle_deg.get()
+            longueur = self.aile_g_long_m.get()
+            epaisseur = self.aile_g_ep_m.get()
+            fruit_vh = self.aile_g_fruit_vh.get()
+            offset = self.aile_g_offset_m.get()
+            y_base = 0  # Côté gauche commence à y=0
+            couleur = '#FFB6C1'  # Rose clair pour aile gauche
+            nom = 'Aile gauche'
+        else:  # droite
+            active = self.aile_d_active.get()
+            angle_deg = self.aile_d_angle_deg.get()
+            longueur = self.aile_d_long_m.get()
+            epaisseur = self.aile_d_ep_m.get() 
+            fruit_vh = self.aile_d_fruit_vh.get()
+            offset = self.aile_d_offset_m.get()
+            y_base = l  # Côté droit commence à y=l
+            couleur = '#DDA0DD'  # Prune clair pour aile droite
+            nom = 'Aile droite'
+        
+        if not active or longueur <= 0 or epaisseur <= 0:
+            return 0
+        
+        # Conversion angle en radians et calcul direction
+        angle_rad = np.radians(angle_deg)
+        h_apparent = h - e_dalle_inf - e_dalle_sup
+        
+        # Points de base du mur en aile (au niveau du radier + e_dalle_inf)
+        x_base = 0  # Tête du dalot
+        
+        if cote == 'gauche':
+            # Direction normale vers l'extérieur côté gauche 
+            dir_y = -np.cos(angle_rad) * longueur  # Vers y négatif
+            dir_x = np.sin(angle_rad) * longueur
+        else:
+            # Direction normale vers l'extérieur côté droit
+            dir_y = np.cos(angle_rad) * longueur  # Vers y positif  
+            dir_x = np.sin(angle_rad) * longueur
+        
+        # Points aux 4 coins de la base du mur
+        if cote == 'gauche':
+            # Pour aile gauche: s'étendre vers l'extérieur depuis y=0
+            p1_base = [x_base, y_base, e_dalle_inf]
+            p2_base = [x_base + dir_x, y_base + dir_y, e_dalle_inf]
+            p3_base = [x_base + dir_x, y_base + dir_y - epaisseur, e_dalle_inf]  
+            p4_base = [x_base, y_base - epaisseur, e_dalle_inf]
+        else:
+            # Pour aile droite: s'étendre vers l'extérieur depuis y=l
+            p1_base = [x_base, y_base, e_dalle_inf]
+            p2_base = [x_base + dir_x, y_base + dir_y, e_dalle_inf]
+            p3_base = [x_base + dir_x, y_base + dir_y + epaisseur, e_dalle_inf]
+            p4_base = [x_base, y_base + epaisseur, e_dalle_inf]
+        
+        # Points au sommet avec fruit et décalage
+        z_top = h - e_dalle_sup
+        fruit_offset_x = fruit_vh * h_apparent
+        
+        p1_top = [p1_base[0] + fruit_offset_x + offset, p1_base[1], z_top]
+        p2_top = [p2_base[0] + fruit_offset_x + offset, p2_base[1], z_top] 
+        p3_top = [p3_base[0] + fruit_offset_x + offset, p3_base[1], z_top]
+        p4_top = [p4_base[0] + fruit_offset_x + offset, p4_base[1], z_top]
+        
+        # Créer les 6 faces du mur en aile (comme un hexaèdre)
+        faces = [
+            [p1_base, p2_base, p3_base, p4_base],  # Face inférieure
+            [p1_top, p4_top, p3_top, p2_top],     # Face supérieure  
+            [p1_base, p1_top, p2_top, p2_base],   # Face avant
+            [p3_base, p2_base, p2_top, p3_top],   # Face extérieure
+            [p4_base, p3_base, p3_top, p4_top],   # Face arrière
+            [p1_base, p4_base, p4_top, p1_top]    # Face intérieure (côté dalot)
+        ]
+        
+        face_names = ["Inférieure", "Supérieure", "Avant", "Extérieure", "Arrière", "Intérieure"]
+        
+        # Ajouter les faces à la scène 3D
+        for i, face in enumerate(faces):
+            collection = Poly3DCollection([face], alpha=0.7, facecolor=couleur, 
+                                        edgecolor='#333333', linewidth=1.0, picker=True)
+            self.ax_3d.add_collection3d(collection)
+            
+            self.original_face_colors[collection] = collection.get_facecolor()
+            self.face_properties[collection] = {
+                'name': f"{nom} - Face {face_names[i]}",
+                'info': f"Mur en aile {cote}",
+                'element_type': f'aile_{cote}',
+                'angle_deg': angle_deg,
+                'longueur_m': longueur,
+                'epaisseur_m': epaisseur,
+                'fruit_vh': fruit_vh,
+                'offset_m': offset
+            }
+        
+        # Retourner la portée maximale en Y pour ajuster les limites
+        if cote == 'gauche':
+            return max(abs(y_base + dir_y), abs(y_base + dir_y - epaisseur))
+        else:
+            return max(abs(y_base + dir_y), abs(y_base + dir_y + epaisseur))
 
     def _ajouter_cotes_3d(self, L, l, h):
         offset = 0.12
@@ -847,6 +1177,23 @@ class ApplicationDalotComplete(tk.Tk):
                 info_text += f"\n🏗️  CALCULS MUR LATÉRAL\n"
                 info_text += f"{'─'*25}\n"
                 info_text += f"⚡ Effort normal: {effort.get('valeur', 0):.2f} N/m\n"
+        
+        # Informations spécifiques aux murs en aile
+        elif element_type.startswith('aile_'):
+            info_text += f"\n🏛️ PARAMÈTRES MUR EN AILE\n"
+            info_text += f"{'─'*30}\n"
+            info_text += f"📐 Angle en plan: {face_info.get('angle_deg', 'N/A'):.0f}°\n"
+            info_text += f"📏 Longueur: {face_info.get('longueur_m', 'N/A'):.2f} m\n"
+            info_text += f"📐 Épaisseur: {face_info.get('epaisseur_m', 'N/A'):.2f} m\n"
+            info_text += f"🔽 Fruit V/H: {face_info.get('fruit_vh', 'N/A'):.2f}\n"
+            info_text += f"↕️  Décalage tête: {face_info.get('offset_m', 'N/A'):.2f} m\n"
+            
+            if self.dalot_calculations and 'poussee_terres' in self.dalot_calculations:
+                poussee = self.dalot_calculations['poussee_terres']
+                info_text += f"\n🌍 POUSSÉE ASSOCIÉE\n"
+                info_text += f"{'─'*20}\n"
+                info_text += f"💨 Force poussée: {poussee.get('force_poussee_par_metre', 0):.0f} N/m\n"
+                info_text += f"📍 Point application: {poussee.get('point_application_hauteur', 0):.2f} m\n"
                 
                 armatures_mur = self.dalot_calculations.get('armatures_mur_choisies', {})
                 if armatures_mur:
@@ -868,7 +1215,29 @@ class ApplicationDalotComplete(tk.Tk):
             h = float(self.hauteur_dalot_m.get())
             e_mur = float(self.epaisseur_voile_lat_m.get())
             e_dalle = float(self.epaisseur_dalle_sup_m.get())
-            self.dalot_calculations = SimulationCalculs.analyser_dalot(L, l, h, e_mur, e_dalle)
+            
+            # Préparer les paramètres utilisateur
+            params = {
+                'sol_gamma_kN_m3': self.sol_gamma_kN_m3.get(),
+                'sol_phi_deg': self.sol_phi_deg.get(),
+                'sol_c_kPa': self.sol_c_kPa.get(),
+                'sol_Ka_manuel': self.sol_Ka_manuel.get(),
+                'sol_K0_manuel': self.sol_K0_manuel.get(),
+                'q_trafic_kN_m2': self.q_trafic_kN_m2.get(),
+                'q_perm_supp_kN_m2': self.q_perm_supp_kN_m2.get(),
+                'gamma_G': self.gamma_G.get(),
+                'gamma_Q': self.gamma_Q.get(),
+                'fck_MPa': self.fck_MPa.get(),
+                'gamma_c': self.gamma_c.get(),
+                'alpha_cc': self.alpha_cc.get(),
+                'fyk_MPa': self.fyk_MPa.get(),
+                'gamma_s': self.gamma_s.get(),
+                'Es_MPa': self.Es_MPa.get(),
+                'enrob_mm': self.enrob_mm.get(),
+                'wk_mm': self.wk_mm.get()
+            }
+            
+            self.dalot_calculations = SimulationCalculs.analyser_dalot(L, l, h, e_mur, e_dalle, params)
             self._mettre_a_jour_verifications()
         except Exception as e:
             self.dalot_calculations = {'erreur': str(e)}
@@ -985,7 +1354,7 @@ class ApplicationDalotComplete(tk.Tk):
     def _generer_rapport_complet(self):
         """Construit un rapport texte lisible à partir des résultats"""
         lignes = []
-        lignes.append("===== RAPPORT DE DIMENSIONNEMENT DALOT (Simplifié) =====")
+        lignes.append("===== RAPPORT DE DIMENSIONNEMENT DALOT (Enrichi) =====")
         lignes.append(f"Projet: {self.nom_projet.get()} | Ingénieur: {self.ingenieur.get() or 'N/A'} | Date: {self.date_projet.get()}")
         lignes.append("")
         lignes.append("GÉOMÉTRIE")
@@ -993,11 +1362,36 @@ class ApplicationDalotComplete(tk.Tk):
         lignes.append(f"- Hauteur intérieure H = {self.hauteur_dalot_m.get():.2f} m")
         lignes.append(f"- Longueur L = {self.longueur_dalot_m.get():.2f} m")
         lignes.append(f"- Dalle sup = {self.epaisseur_dalle_sup_m.get():.2f} m | Dalle inf = {self.epaisseur_dalle_inf_m.get():.2f} m | Murs = {self.epaisseur_voile_lat_m.get():.2f} m")
+        
+        # Murs en aile
+        if self.aile_g_active.get() or self.aile_d_active.get():
+            lignes.append("")
+            lignes.append("MURS EN AILE")
+            if self.aile_g_active.get():
+                lignes.append(f"- Aile gauche: L={self.aile_g_long_m.get():.2f}m, α={self.aile_g_angle_deg.get():.0f}°, e={self.aile_g_ep_m.get():.2f}m")
+                lignes.append(f"  Fruit V/H={self.aile_g_fruit_vh.get():.2f}, Offset={self.aile_g_offset_m.get():.2f}m")
+            if self.aile_d_active.get():
+                lignes.append(f"- Aile droite: L={self.aile_d_long_m.get():.2f}m, α={self.aile_d_angle_deg.get():.0f}°, e={self.aile_d_ep_m.get():.2f}m")
+                lignes.append(f"  Fruit V/H={self.aile_d_fruit_vh.get():.2f}, Offset={self.aile_d_offset_m.get():.2f}m")
+        
         lignes.append("")
         lignes.append("MATÉRIAUX")
         lignes.append(f"- Béton: {self.classe_beton.get()}")
         lignes.append(f"- Acier: {self.classe_acier.get()}")
         lignes.append(f"- Exposition: {self.classe_exposition.get()}")
+        
+        # Paramètres détaillés
+        if 'parametres' in self.dalot_calculations:
+            p = self.dalot_calculations['parametres']
+            lignes.append("")
+            lignes.append("PARAMÈTRES DE CALCUL")
+            lignes.append(f"- Béton: fck={p['fck_MPa']:.0f} MPa, fcd={p['fcd_MPa']:.1f} MPa, γc={p.get('gamma_c',1.5):.2f}")
+            lignes.append(f"- Acier: fyk={p['fyk_MPa']:.0f} MPa, fyd={p['fyd_MPa']:.0f} MPa, γs={p.get('gamma_s',1.15):.2f}")
+            lignes.append(f"- Enrobage: {p['enrobage_mm']:.0f} mm")
+            lignes.append(f"- Sol: γsol={p['gamma_sol_kN_m3']:.1f} kN/m³, φ={p['phi_deg']:.0f}°, c={p['c_kPa']:.1f} kPa")
+            lignes.append(f"- Coeff. poussée: Ka={p['Ka']:.3f} ({self.dalot_calculations['poussee_terres'].get('formule_Ka','Rankine')}), K0={p['K0']:.3f} ({self.dalot_calculations['poussee_terres'].get('formule_K0','Jaky')})")
+            lignes.append(f"- Combinaisons: γG={p['gamma_G']:.2f}, γQ={p['gamma_Q']:.2f}")
+        
         lignes.append("")
         if 'volumes_masses' in self.dalot_calculations:
             vm = self.dalot_calculations['volumes_masses']
@@ -1007,31 +1401,41 @@ class ApplicationDalotComplete(tk.Tk):
                     lignes.append(f"- {v['info']}: Vol={v['volume']:.3f} m³ | Masse={v['masse']:.0f} kg")
             lignes.append(f"- Total: Vol={vm['total']['volume']:.3f} m³ | Masse={vm['total']['masse']:.0f} kg")
             lignes.append("")
+            
         if 'charges_dalle_couverture' in self.dalot_calculations:
             ch = self.dalot_calculations['charges_dalle_couverture']
             lignes.append("CHARGES SUR DALLE DE COUVERTURE")
             lignes.append(f"- Poids propre dalle: {ch['q_pp_dalle']:.0f} N/m²")
-            lignes.append(f"- Exploitation: {ch['q_exploitation']:.0f} N/m² | Perm. supp.: {ch['q_permanente_supp']:.0f} N/m²")
+            lignes.append(f"- Trafic: {ch.get('q_trafic',0):.0f} N/m² | Perm. supp.: {ch['q_permanente_supp']:.0f} N/m²")
             lignes.append(f"- Service (ELS): {ch['q_service']:.0f} N/m² | ELU: {ch['q_ELU']:.0f} N/m²")
             lignes.append("")
+            
         if 'poussee_terres' in self.dalot_calculations:
             p = self.dalot_calculations['poussee_terres']
             lignes.append("POUSSÉE DES TERRES")
-            lignes.append(f"- σh à la base: {p['sigma_h_base']/1000:.1f} kPa")
+            lignes.append(f"- σh à la base: {p['sigma_h_base']/1000:.1f} kPa (incl. surcharge)")
             lignes.append(f"- Force poussée (par mètre): {p['force_poussee_par_metre']:.0f} N/m")
-            lignes.append(f"- Point d'application: {p['point_application_hauteur']:.2f} m")
+            lignes.append(f"- Point d'application: {p['point_application_hauteur']:.2f} m depuis la base")
             lignes.append("")
+            
         if 'ferraillage_dalle_couverture' in self.dalot_calculations:
             f = self.dalot_calculations['ferraillage_dalle_couverture']
             arm = self.dalot_calculations.get('armatures_dalle_choisies', {})
-            lignes.append("FERRAILLAGE DALLE DE COUVERTURE (simplifié)")
+            lignes.append("FERRAILLAGE DALLE DE COUVERTURE")
             lignes.append(f"- Moment ELU: {f['moment_ELU']:.0f} Nm/m")
+            lignes.append(f"- Hauteur utile d: {f.get('d_m',0)*100:.1f} cm")
             lignes.append(f"- As théorique: {f['As_theorique']*1e4:.2f} cm²/m")
             if arm:
                 lignes.append(f"- Armatures proposées: φ{arm.get('diametre','?')} @ {arm.get('espacement','?')} cm")
                 lignes.append(f"- As fourni: {arm.get('As_fourni',0)*1e4:.2f} cm²/m")
             lignes.append("")
-        lignes.append("NOTE: Résultats indicatifs à valider par un calcul complet selon la norme choisie.")
+            
+        lignes.append("MÉTHODOLOGIE")
+        lignes.append("- Poussée des terres: Théorie de Rankine (Ka) et Jaky (K0)")
+        lignes.append("- Combinaisons: Eurocode 0 (EN 1990)")
+        lignes.append("- Béton armé: Eurocode 2 (EN 1992)")
+        lignes.append("")
+        lignes.append("NOTE: Résultats indicatifs à valider par un calcul complet selon les normes en vigueur.")
         return "\n".join(lignes)
 
     # Commandes diverses
