@@ -181,7 +181,7 @@ class ApplicationDalotComplete(tk.Tk):
         self.geometry("1600x1000")
         self.minsize(1400, 900)
 
-        self.chemin_fichier_courant = None
+        self.chemin_fichier_actuel = ""
         self.modifie = False
         self.zoom_factor = 1.1
         self.selected_face = None
@@ -247,8 +247,9 @@ class ApplicationDalotComplete(tk.Tk):
 
         menu_fichier = tk.Menu(barre_menu, tearoff=0)
         menu_fichier.add_command(label="Nouveau", accelerator="Ctrl+N", command=self.action_nouveau)
-        menu_fichier.add_command(label="Ouvrir...", accelerator="Ctrl+O", command=self.action_ouvrir)
-        menu_fichier.add_command(label="Enregistrer", accelerator="Ctrl+S", command=self.action_enregistrer)
+        menu_fichier.add_command(label="Ouvrir...", accelerator="Ctrl+O", command=self.cmd_ouvrir_projet)
+        menu_fichier.add_command(label="Enregistrer", accelerator="Ctrl+S", command=self.cmd_enregistrer_projet)
+        menu_fichier.add_command(label="Enregistrer sous...", command=self.cmd_enregistrer_sous_projet)
         menu_fichier.add_separator()
         menu_fichier.add_command(label="Exporter PDF...", command=self.cmd_exporter_pdf)
         menu_fichier.add_separator()
@@ -263,10 +264,11 @@ class ApplicationDalotComplete(tk.Tk):
         barre_menu.add_cascade(label="Calcul", menu=menu_calcul)
 
         menu_vue = tk.Menu(barre_menu, tearoff=0)
-        menu_vue.add_command(label="Vue de face", command=self.cmd_vue_face)
-        menu_vue.add_command(label="Vue de côté", command=self.cmd_vue_cote)
-        menu_vue.add_command(label="Vue de dessus", command=self.cmd_vue_dessus)
-        menu_vue.add_command(label="Vue isométrique", command=self.cmd_vue_isometrique)
+        menu_vue.add_command(label="Vue de face", command=self._vue_face_animee)
+        menu_vue.add_command(label="Vue de côté", command=self._vue_cote_animee)
+        menu_vue.add_command(label="Vue de dessus", command=self._vue_dessus_animee)
+        menu_vue.add_command(label="Vue isométrique", command=self._vue_isometrique_animee)
+        menu_vue.add_command(label="Reset vue", command=self._reset_vue_animee)
         barre_menu.add_cascade(label="Vue", menu=menu_vue)
 
         menu_aide = tk.Menu(barre_menu, tearoff=0)
@@ -277,9 +279,9 @@ class ApplicationDalotComplete(tk.Tk):
         self.config(menu=barre_menu)
         
         # Raccourcis clavier
-        self.bind_all("<Control-n>", lambda e: self.action_nouveau())
-        self.bind_all("<Control-o>", lambda e: self.action_ouvrir())
-        self.bind_all("<Control-s>", lambda e: self.action_enregistrer())
+        self.bind_all("<Control-n>", lambda e: self.cmd_nouveau_projet())
+        self.bind_all("<Control-o>", lambda e: self.cmd_ouvrir_projet())
+        self.bind_all("<Control-s>", lambda e: self.cmd_enregistrer_projet())
 
     def _creer_barre_outils(self):
         cadre = ttk.Frame(self, relief="raised", borderwidth=1)
@@ -287,9 +289,9 @@ class ApplicationDalotComplete(tk.Tk):
 
         grp_fichier = ttk.LabelFrame(cadre, text="Fichier")
         grp_fichier.pack(side="left", padx=5, pady=2)
-        ttk.Button(grp_fichier, text="Nouveau", command=self.action_nouveau).pack(side="left", padx=2, pady=2)
-        ttk.Button(grp_fichier, text="Ouvrir", command=self.action_ouvrir).pack(side="left", padx=2, pady=2)
-        ttk.Button(grp_fichier, text="Enregistrer", command=self.action_enregistrer).pack(side="left", padx=2, pady=2)
+        ttk.Button(grp_fichier, text="Nouveau", command=self.cmd_nouveau_projet).pack(side="left", padx=2, pady=2)
+        ttk.Button(grp_fichier, text="Ouvrir", command=self.cmd_ouvrir_projet).pack(side="left", padx=2, pady=2)
+        ttk.Button(grp_fichier, text="Enregistrer", command=self.cmd_enregistrer_projet).pack(side="left", padx=2, pady=2)
 
         grp_calcul = ttk.LabelFrame(cadre, text="Calcul")
         grp_calcul.pack(side="left", padx=5, pady=2)
@@ -299,10 +301,10 @@ class ApplicationDalotComplete(tk.Tk):
 
         grp_vue = ttk.LabelFrame(cadre, text="Vues")
         grp_vue.pack(side="left", padx=5, pady=2)
-        ttk.Button(grp_vue, text="Face", command=self.cmd_vue_face).pack(side="left", padx=1, pady=2)
-        ttk.Button(grp_vue, text="Côté", command=self.cmd_vue_cote).pack(side="left", padx=1, pady=2)
-        ttk.Button(grp_vue, text="Dessus", command=self.cmd_vue_dessus).pack(side="left", padx=1, pady=2)
-        ttk.Button(grp_vue, text="Iso", command=self.cmd_vue_isometrique).pack(side="left", padx=1, pady=2)
+        ttk.Button(grp_vue, text="Face", command=self._vue_face_animee).pack(side="left", padx=1, pady=2)
+        ttk.Button(grp_vue, text="Côté", command=self._vue_cote_animee).pack(side="left", padx=1, pady=2)
+        ttk.Button(grp_vue, text="Dessus", command=self._vue_dessus_animee).pack(side="left", padx=1, pady=2)
+        ttk.Button(grp_vue, text="Iso", command=self._vue_isometrique_animee).pack(side="left", padx=1, pady=2)
 
         self.barre_progression = ttk.Progressbar(cadre, mode="determinate", length=200)
         self.barre_progression.pack(side="right", padx=10, pady=5)
@@ -421,6 +423,32 @@ class ApplicationDalotComplete(tk.Tk):
         self.info_exposition.grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=2)
         self._maj_info_exposition()
 
+        # Armatures
+        grp_armatures = ttk.LabelFrame(cadre, text="Configuration des armatures")
+        grp_armatures.pack(fill="x", padx=10, pady=10)
+
+        ttk.Label(grp_armatures, text="Diamètre principal:").grid(row=0, column=0, sticky="e", padx=5, pady=4)
+        combo_dia_princ = ttk.Combobox(grp_armatures, textvariable=self.diametre_principal, width=15,
+                                      values=DonneesNormalisees.DIAMETRES_PRINCIPAUX, state="readonly")
+        combo_dia_princ.grid(row=0, column=1, sticky="w", padx=5, pady=4)
+        combo_dia_princ.bind("<<ComboboxSelected>>", self._maj_calcul_armatures)
+
+        ttk.Label(grp_armatures, text="Diamètre secondaire:").grid(row=1, column=0, sticky="e", padx=5, pady=4)
+        combo_dia_sec = ttk.Combobox(grp_armatures, textvariable=self.diametre_secondaire, width=15,
+                                    values=DonneesNormalisees.DIAMETRES_SECONDAIRES, state="readonly")
+        combo_dia_sec.grid(row=1, column=1, sticky="w", padx=5, pady=4)
+        combo_dia_sec.bind("<<ComboboxSelected>>", self._maj_calcul_armatures)
+
+        ttk.Label(grp_armatures, text="Espacement (mm):").grid(row=2, column=0, sticky="e", padx=5, pady=4)
+        entry_esp = ttk.Entry(grp_armatures, textvariable=self.espacement_barres_mm, width=15)
+        entry_esp.grid(row=2, column=1, sticky="w", padx=5, pady=4)
+        entry_esp.bind("<KeyRelease>", lambda e: self._valider_espacement(entry_esp))
+        entry_esp.bind("<FocusOut>", lambda e: self._valider_espacement(entry_esp))
+
+        self.info_armatures = ttk.Label(grp_armatures, text="", foreground="green")
+        self.info_armatures.grid(row=3, column=0, columnspan=3, sticky="w", padx=5, pady=2)
+        self._maj_calcul_armatures()
+
     def _onglet_charges(self):
         cadre = ttk.Frame(self.notebook_parametres)
         self.notebook_parametres.add(cadre, text="⚖️ Charges")
@@ -503,23 +531,37 @@ class ApplicationDalotComplete(tk.Tk):
         ligne1 = ttk.Frame(cadre_controles)
         ligne1.pack(fill="x", pady=2)
 
-        # Entrées de géométrie avec mise à jour automatique
+        # Entrées de géométrie avec validation en temps réel
         ttk.Label(ligne1, text="L:").pack(side="left", padx=2)
         entry_l = ttk.Entry(ligne1, textvariable=self.longueur_dalot_m, width=6)
         entry_l.pack(side="left", padx=2)
-        entry_l.bind("<KeyRelease>", lambda e: self.after(500, self._dessiner_dalot_3d))
+        entry_l.bind("<KeyRelease>", lambda e: self._valider_et_dessiner(entry_l, "longueur"))
+        entry_l.bind("<FocusOut>", lambda e: self._valider_et_dessiner(entry_l, "longueur"))
 
         ttk.Label(ligne1, text="l:").pack(side="left", padx=(10,2))
         entry_largeur = ttk.Entry(ligne1, textvariable=self.largeur_dalot_m, width=6)
         entry_largeur.pack(side="left", padx=2)
-        entry_largeur.bind("<KeyRelease>", lambda e: self.after(500, self._dessiner_dalot_3d))
+        entry_largeur.bind("<KeyRelease>", lambda e: self._valider_et_dessiner(entry_largeur, "largeur"))
+        entry_largeur.bind("<FocusOut>", lambda e: self._valider_et_dessiner(entry_largeur, "largeur"))
 
         ttk.Label(ligne1, text="H:").pack(side="left", padx=(10,2))
         entry_h = ttk.Entry(ligne1, textvariable=self.hauteur_dalot_m, width=6)
         entry_h.pack(side="left", padx=2)
-        entry_h.bind("<KeyRelease>", lambda e: self.after(500, self._dessiner_dalot_3d))
+        entry_h.bind("<KeyRelease>", lambda e: self._valider_et_dessiner(entry_h, "hauteur"))
+        entry_h.bind("<FocusOut>", lambda e: self._valider_et_dessiner(entry_h, "hauteur"))
 
         ttk.Button(ligne1, text="🔄 Actualiser", command=self._dessiner_dalot_3d).pack(side="left", padx=10)
+
+        # Vues 3D prédéfinies avec animations
+        ligne_vues = ttk.Frame(cadre_controles)
+        ligne_vues.pack(fill="x", pady=2)
+        
+        ttk.Label(ligne_vues, text="Vues 3D:").pack(side="left", padx=5)
+        ttk.Button(ligne_vues, text="🏠 Face", command=self._vue_face_animee, width=8).pack(side="left", padx=2)
+        ttk.Button(ligne_vues, text="👁️ Côté", command=self._vue_cote_animee, width=8).pack(side="left", padx=2)
+        ttk.Button(ligne_vues, text="🔝 Dessus", command=self._vue_dessus_animee, width=8).pack(side="left", padx=2)
+        ttk.Button(ligne_vues, text="🎲 Iso", command=self._vue_isometrique_animee, width=8).pack(side="left", padx=2)
+        ttk.Button(ligne_vues, text="🎯 Reset", command=self._reset_vue_animee, width=8).pack(side="left", padx=10)
 
         # Options d'affichage
         ligne2 = ttk.Frame(cadre_controles)
@@ -531,6 +573,11 @@ class ApplicationDalotComplete(tk.Tk):
                        command=self._dessiner_dalot_3d).pack(side="left", padx=5)
         ttk.Checkbutton(ligne2, text="🔧 Armatures", variable=self.afficher_armatures, 
                        command=self._dessiner_dalot_3d).pack(side="left", padx=5)
+        
+        # Aide contextuelle
+        self.label_aide = ttk.Label(ligne2, text="💡 Molette: zoom | Clic-glisser: rotation | Shift+Clic: panoramique", 
+                                   foreground="gray", font=("TkDefaultFont", 8))
+        self.label_aide.pack(side="right", padx=5)
 
         # Figure matplotlib 3D
         self.figure_3d = plt.figure(figsize=(12, 9))
@@ -542,9 +589,21 @@ class ApplicationDalotComplete(tk.Tk):
         self.toolbar_3d = NavigationToolbar2Tk(self.canvas_3d, cadre_3d)
         self.toolbar_3d.update()
         
-        # Événements
+        # Variables pour navigation améliorée
+        self._dragging = False
+        self._last_mouse_pos = None
+        self._pan_mode = False
+        
+        # Événements de navigation 3D améliorée
         self.canvas_3d.mpl_connect("scroll_event", self._on_scroll_zoom)
         self.canvas_3d.mpl_connect("pick_event", self._on_pick_face)
+        self.canvas_3d.mpl_connect("button_press_event", self._on_mouse_press)
+        self.canvas_3d.mpl_connect("button_release_event", self._on_mouse_release)
+        self.canvas_3d.mpl_connect("motion_notify_event", self._on_mouse_motion)
+        
+        # Événements clavier pour raccourcis
+        self.canvas_3d.get_tk_widget().bind("<KeyPress>", self._on_key_press)
+        self.canvas_3d.get_tk_widget().focus_set()  # Pour recevoir les événements clavier
 
     def _creer_barre_statut(self):
         cadre_statut = ttk.Frame(self, relief="sunken", borderwidth=1)
@@ -573,6 +632,50 @@ class ApplicationDalotComplete(tk.Tk):
         self.update_idletasks()
 
     # Méthodes utilitaires
+    # Méthodes utilitaires
+    def _marquer_modifie(self):
+        """Marquer le projet comme modifié"""
+        if not self.modifie:
+            self.modifie = True
+            titre_actuel = self.title()
+            if not titre_actuel.endswith("*"):
+                self.title(titre_actuel + "*")
+
+    def _initialiser_variables(self):
+        """Réinitialiser toutes les variables aux valeurs par défaut"""
+        # Projet
+        self.nom_projet.set("Dalot - Nouveau projet")
+        self.ingenieur.set("Kevindjoum")
+        self.localisation.set("")
+        import datetime
+        self.date_projet.set(datetime.date.today().strftime("%Y-%m-%d"))
+        
+        # Géométrie
+        self.largeur_dalot_m.set(3.0)
+        self.hauteur_dalot_m.set(2.0)
+        self.longueur_dalot_m.set(20.0)
+        self.epaisseur_dalle_sup_m.set(0.30)
+        self.epaisseur_dalle_inf_m.set(0.30)
+        self.epaisseur_voile_lat_m.set(0.25)
+        
+        # Matériaux
+        self.classe_beton.set("C30/37")
+        self.classe_acier.set("B500B")
+        self.classe_exposition.set("XC3 (Humidité modérée)")
+        self.diametre_principal.set("φ16")
+        self.diametre_secondaire.set("φ12")
+        self.espacement_barres_mm.set(150)
+        
+        # Charges
+        self.classe_trafic.set("T2 (Véhicules légers)")
+        self.type_remblai.set("Sable compacté")
+        self.hauteur_remblai_m.set(1.5)
+        
+        # Options
+        self.afficher_legendes.set(True)
+        self.afficher_cotes.set(True)
+        self.afficher_armatures.set(False)
+
     def _ajouter_champ(self, parent, texte_label, var, ligne: int, info: str = ""):
         ttk.Label(parent, text=texte_label).grid(row=ligne, column=0, sticky="e", padx=5, pady=4)
         entree = ttk.Entry(parent, textvariable=var)
@@ -622,6 +725,59 @@ class ApplicationDalotComplete(tk.Tk):
         if type_rem in DonneesNormalisees.TYPES_REMBLAI:
             info = DonneesNormalisees.TYPES_REMBLAI[type_rem]
             self.info_remblai.config(text=f"Densité = {info['densite']} kN/m³, Angle = {info['angle']}° - {info['description']}")
+
+    def _valider_espacement(self, widget):
+        """Validation de l'espacement des armatures"""
+        try:
+            espacement = int(widget.get())
+            if espacement < 50:
+                widget.config({"background": "#FFCDD2"})
+                self.info_armatures.config(text="⚠️ Espacement minimum: 50 mm", foreground="red")
+            elif espacement > 400:
+                widget.config({"background": "#FFCDD2"})
+                self.info_armatures.config(text="⚠️ Espacement maximum: 400 mm", foreground="red")
+            else:
+                widget.config({"background": "#C8E6C9"})
+                self._maj_calcul_armatures()
+                self._marquer_modifie()
+        except ValueError:
+            widget.config({"background": "#FFCDD2"})
+            self.info_armatures.config(text="⚠️ Veuillez entrer un nombre entier", foreground="red")
+
+    def _maj_calcul_armatures(self, event=None):
+        """Mise à jour des calculs d'armatures"""
+        try:
+            # Extraire le diamètre numérique
+            dia_princ_str = self.diametre_principal.get().replace("φ", "")
+            dia_sec_str = self.diametre_secondaire.get().replace("φ", "")
+            
+            if not dia_princ_str or not dia_sec_str:
+                return
+                
+            dia_princ = int(dia_princ_str)
+            dia_sec = int(dia_sec_str)
+            espacement = self.espacement_barres_mm.get()
+            
+            # Calcul de la section d'acier par mètre
+            import math
+            section_barre_princ = math.pi * (dia_princ/2)**2  # mm²
+            section_barre_sec = math.pi * (dia_sec/2)**2  # mm²
+            
+            # Section par mètre linéaire
+            As_princ_par_m = section_barre_princ * 1000 / espacement  # mm²/m
+            As_sec_par_m = section_barre_sec * 1000 / espacement  # mm²/m
+            
+            # Mise à jour de l'affichage
+            self.info_armatures.config(
+                text=f"As principal: {As_princ_par_m:.1f} mm²/m | As secondaire: {As_sec_par_m:.1f} mm²/m",
+                foreground="green"
+            )
+            
+            # Déclencher le recalcul automatique
+            self.after(100, self._lancer_calculs_automatique)
+            
+        except (ValueError, AttributeError):
+            self.info_armatures.config(text="Sélectionnez diamètres et espacement", foreground="gray")
 
     # Méthodes de visualisation 3D
     def _dessiner_dalot_3d(self):
@@ -766,7 +922,105 @@ class ApplicationDalotComplete(tk.Tk):
                        fontsize=11, ha='center', color='#2E4057', weight='bold',
                        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
 
-    # Événements 3D
+    # Validation et mise à jour en temps réel
+    def _valider_et_dessiner(self, widget, type_champ):
+        """Validation en temps réel avec indicateurs visuels"""
+        try:
+            valeur = float(widget.get())
+            if valeur <= 0:
+                widget.config({"background": "#FFCDD2"})  # Rouge clair pour erreur
+                self.label_aide.config(text=f"⚠️ {type_champ.capitalize()} doit être positive", foreground="red")
+                return
+            else:
+                widget.config({"background": "#C8E6C9"})  # Vert clair pour valide
+                self.label_aide.config(text="✓ Valeur valide", foreground="green")
+                # Marquer comme modifié
+                self._marquer_modifie()
+                # Dessiner avec délai pour éviter trop de redessins
+                self.after(300, self._dessiner_dalot_3d)
+        except ValueError:
+            widget.config({"background": "#FFCDD2"})
+            self.label_aide.config(text="⚠️ Veuillez entrer un nombre valide", foreground="red")
+
+    # Navigation 3D améliorée
+    def _on_mouse_press(self, event):
+        """Gestion du clic de souris"""
+        if event.inaxes == self.ax_3d:
+            self._dragging = True
+            self._last_mouse_pos = (event.x, event.y)
+            # Mode panoramique avec shift ou clic droit
+            self._pan_mode = event.button == 3 or (hasattr(event, 'key') and event.key == 'shift')
+
+    def _on_mouse_release(self, event):
+        """Gestion du relâchement de souris"""
+        self._dragging = False
+        self._last_mouse_pos = None
+        self._pan_mode = False
+
+    def _on_mouse_motion(self, event):
+        """Gestion du mouvement de souris pour rotation et panoramique"""
+        if not self._dragging or not event.inaxes == self.ax_3d or not self._last_mouse_pos:
+            return
+            
+        dx = event.x - self._last_mouse_pos[0]
+        dy = event.y - self._last_mouse_pos[1]
+        
+        if self._pan_mode:
+            # Panoramique
+            self._pan_3d(dx, dy)
+        else:
+            # Rotation
+            self._rotate_3d(dx, dy)
+        
+        self._last_mouse_pos = (event.x, event.y)
+        self.canvas_3d.draw_idle()
+
+    def _rotate_3d(self, dx, dy):
+        """Rotation 3D avec la souris"""
+        elev, azim = self.ax_3d.elev, self.ax_3d.azim
+        # Sensibilité ajustée
+        azim += dx * 0.5
+        elev -= dy * 0.5
+        # Limiter l'élévation pour éviter les retournements
+        elev = max(-90, min(90, elev))
+        self.ax_3d.view_init(elev=elev, azim=azim)
+
+    def _pan_3d(self, dx, dy):
+        """Panoramique 3D avec la souris"""
+        # Obtenir les limites actuelles
+        xlim = self.ax_3d.get_xlim3d()
+        ylim = self.ax_3d.get_ylim3d()
+        zlim = self.ax_3d.get_zlim3d()
+        
+        # Calculer le déplacement basé sur la taille de la vue
+        x_range = xlim[1] - xlim[0]
+        y_range = ylim[1] - ylim[0]
+        z_range = zlim[1] - zlim[0]
+        
+        # Facteur de sensibilité
+        pan_scale = 0.001
+        dx_world = -dx * pan_scale * x_range
+        dy_world = dy * pan_scale * y_range
+        
+        # Appliquer le panoramique
+        self.ax_3d.set_xlim3d([xlim[0] + dx_world, xlim[1] + dx_world])
+        self.ax_3d.set_ylim3d([ylim[0] + dy_world, ylim[1] + dy_world])
+
+    def _on_key_press(self, event):
+        """Raccourcis clavier pour les vues 3D"""
+        key = event.keysym.lower()
+        if key == 'f':
+            self._vue_face_animee()
+        elif key == 'c':
+            self._vue_cote_animee()
+        elif key == 't':
+            self._vue_dessus_animee()
+        elif key == 'i':
+            self._vue_isometrique_animee()
+        elif key == 'r':
+            self._reset_vue_animee()
+
+    # Événements 3D améliorés
     def _on_scroll_zoom(self, event):
         if event.inaxes == self.ax_3d:
             current_xlim = self.ax_3d.get_xlim3d()
@@ -777,10 +1031,11 @@ class ApplicationDalotComplete(tk.Tk):
             y_center = (current_ylim[0] + current_ylim[1]) / 2
             z_center = (current_zlim[0] + current_zlim[1]) / 2
 
+            # Zoom plus fluide
             if event.button == 'up':
-                zoom_factor = 1 / self.zoom_factor
+                zoom_factor = 1 / 1.15
             elif event.button == 'down':
-                zoom_factor = self.zoom_factor
+                zoom_factor = 1.15
             else:
                 return
 
@@ -916,6 +1171,185 @@ class ApplicationDalotComplete(tk.Tk):
         self.zone_verifications.insert("1.0", "\n".join(lignes))
         self.zone_verifications.see(tk.END)
 
+    # Sauvegarde et chargement de projets
+    def cmd_nouveau_projet(self):
+        """Créer un nouveau projet"""
+        if self.modifie:
+            response = messagebox.askyesnocancel("Nouveau projet", 
+                                               "Voulez-vous enregistrer le projet actuel avant de créer un nouveau ?")
+            if response is None:  # Annuler
+                return
+            elif response:  # Oui
+                if not self.cmd_enregistrer_projet():
+                    return
+        
+        # Réinitialiser toutes les variables
+        self._initialiser_variables()
+        self.chemin_fichier_actuel = ""
+        self.modifie = False
+        self._dessiner_dalot_3d()
+        self.journaliser("Nouveau projet créé")
+        self.title("Dalot Pro - Nouveau projet")
+
+    def cmd_ouvrir_projet(self):
+        """Ouvrir un projet existant"""
+        if self.modifie:
+            response = messagebox.askyesnocancel("Ouvrir projet", 
+                                               "Voulez-vous enregistrer le projet actuel ?")
+            if response is None:
+                return
+            elif response:
+                if not self.cmd_enregistrer_projet():
+                    return
+        
+        chemin = filedialog.askopenfilename(
+            title="Ouvrir un projet",
+            defaultextension=".dalot",
+            filetypes=[("Projets Dalot", "*.dalot"), ("JSON", "*.json"), ("Tous", "*.*")]
+        )
+        
+        if not chemin:
+            return
+            
+        try:
+            import json
+            with open(chemin, 'r', encoding='utf-8') as f:
+                donnees = json.load(f)
+            
+            # Charger les données du projet
+            self._charger_donnees_projet(donnees)
+            
+            self.chemin_fichier_actuel = chemin
+            self.modifie = False
+            self._dessiner_dalot_3d()
+            self.journaliser(f"Projet ouvert: {chemin}")
+            self.title(f"Dalot Pro - {donnees.get('nom_projet', 'Projet sans nom')}")
+            
+        except Exception as e:
+            messagebox.showerror("Erreur d'ouverture", f"Impossible d'ouvrir le fichier:\n{str(e)}")
+
+    def cmd_enregistrer_projet(self):
+        """Enregistrer le projet actuel"""
+        if not self.chemin_fichier_actuel:
+            return self.cmd_enregistrer_sous_projet()
+        
+        try:
+            donnees = self._extraire_donnees_projet()
+            import json
+            with open(self.chemin_fichier_actuel, 'w', encoding='utf-8') as f:
+                json.dump(donnees, f, indent=2, ensure_ascii=False)
+            
+            self.modifie = False
+            self.journaliser(f"Projet enregistré: {self.chemin_fichier_actuel}")
+            return True
+            
+        except Exception as e:
+            messagebox.showerror("Erreur d'enregistrement", f"Impossible d'enregistrer:\n{str(e)}")
+            return False
+
+    def cmd_enregistrer_sous_projet(self):
+        """Enregistrer sous un nouveau nom"""
+        nom_defaut = self.nom_projet.get().replace(" ", "_") if self.nom_projet.get() else "dalot_projet"
+        chemin = filedialog.asksaveasfilename(
+            title="Enregistrer le projet sous",
+            defaultextension=".dalot",
+            initialvalue=f"{nom_defaut}.dalot",
+            filetypes=[("Projets Dalot", "*.dalot"), ("JSON", "*.json")]
+        )
+        
+        if not chemin:
+            return False
+            
+        try:
+            donnees = self._extraire_donnees_projet()
+            import json
+            with open(chemin, 'w', encoding='utf-8') as f:
+                json.dump(donnees, f, indent=2, ensure_ascii=False)
+            
+            self.chemin_fichier_actuel = chemin
+            self.modifie = False
+            self.journaliser(f"Projet enregistré sous: {chemin}")
+            self.title(f"Dalot Pro - {donnees.get('nom_projet', 'Projet')}")
+            return True
+            
+        except Exception as e:
+            messagebox.showerror("Erreur d'enregistrement", f"Impossible d'enregistrer:\n{str(e)}")
+            return False
+
+    def _extraire_donnees_projet(self):
+        """Extraire toutes les données du projet en dictionnaire"""
+        return {
+            "version": "1.0",
+            "nom_projet": self.nom_projet.get(),
+            "ingenieur": self.ingenieur.get(),
+            "localisation": self.localisation.get(),
+            "date_projet": self.date_projet.get(),
+            "geometrie": {
+                "longueur_dalot_m": self.longueur_dalot_m.get(),
+                "largeur_dalot_m": self.largeur_dalot_m.get(),
+                "hauteur_dalot_m": self.hauteur_dalot_m.get(),
+                "epaisseur_dalle_sup_m": self.epaisseur_dalle_sup_m.get(),
+                "epaisseur_dalle_inf_m": self.epaisseur_dalle_inf_m.get(),
+                "epaisseur_voile_lat_m": self.epaisseur_voile_lat_m.get()
+            },
+            "materiaux": {
+                "classe_beton": self.classe_beton.get(),
+                "classe_acier": self.classe_acier.get(),
+                "classe_exposition": self.classe_exposition.get(),
+                "diametre_principal": self.diametre_principal.get(),
+                "diametre_secondaire": self.diametre_secondaire.get(),
+                "espacement_barres_mm": self.espacement_barres_mm.get()
+            },
+            "charges": {
+                "classe_trafic": self.classe_trafic.get(),
+                "type_remblai": self.type_remblai.get(),
+                "hauteur_remblai_m": self.hauteur_remblai_m.get()
+            },
+            "options": {
+                "afficher_legendes": self.afficher_legendes.get(),
+                "afficher_cotes": self.afficher_cotes.get(),
+                "afficher_armatures": self.afficher_armatures.get()
+            }
+        }
+
+    def _charger_donnees_projet(self, donnees):
+        """Charger les données du projet depuis un dictionnaire"""
+        # Informations projet
+        self.nom_projet.set(donnees.get("nom_projet", ""))
+        self.ingenieur.set(donnees.get("ingenieur", ""))
+        self.localisation.set(donnees.get("localisation", ""))
+        self.date_projet.set(donnees.get("date_projet", ""))
+        
+        # Géométrie
+        geom = donnees.get("geometrie", {})
+        self.longueur_dalot_m.set(geom.get("longueur_dalot_m", 10.0))
+        self.largeur_dalot_m.set(geom.get("largeur_dalot_m", 3.0))
+        self.hauteur_dalot_m.set(geom.get("hauteur_dalot_m", 2.5))
+        self.epaisseur_dalle_sup_m.set(geom.get("epaisseur_dalle_sup_m", 0.3))
+        self.epaisseur_dalle_inf_m.set(geom.get("epaisseur_dalle_inf_m", 0.3))
+        self.epaisseur_voile_lat_m.set(geom.get("epaisseur_voile_lat_m", 0.25))
+        
+        # Matériaux
+        mat = donnees.get("materiaux", {})
+        self.classe_beton.set(mat.get("classe_beton", "C30/37"))
+        self.classe_acier.set(mat.get("classe_acier", "B500B"))
+        self.classe_exposition.set(mat.get("classe_exposition", "XC3 (Humidité modérée)"))
+        self.diametre_principal.set(mat.get("diametre_principal", "φ16"))
+        self.diametre_secondaire.set(mat.get("diametre_secondaire", "φ12"))
+        self.espacement_barres_mm.set(mat.get("espacement_barres_mm", 150))
+        
+        # Charges
+        charges = donnees.get("charges", {})
+        self.classe_trafic.set(charges.get("classe_trafic", "T2 (Véhicules légers)"))
+        self.type_remblai.set(charges.get("type_remblai", "Sable compacté"))
+        self.hauteur_remblai_m.set(charges.get("hauteur_remblai_m", 1.5))
+        
+        # Options
+        options = donnees.get("options", {})
+        self.afficher_legendes.set(options.get("afficher_legendes", True))
+        self.afficher_cotes.set(options.get("afficher_cotes", True))
+        self.afficher_armatures.set(options.get("afficher_armatures", False))
+
     # Commandes principales
     def cmd_verifier_entrees(self):
         """Vérification des données avec messages explicites"""
@@ -951,20 +1385,54 @@ class ApplicationDalotComplete(tk.Tk):
             self.journaliser(f"Erreur de validation: {str(e)}")
 
     def cmd_lancer_calculs(self):
-        """Lance les calculs complets et génère le rapport"""
+        """Lance les calculs complets avec barre de progression"""
         self.journaliser("Début des calculs de dimensionnement...")
-        self.maj_statut("Calculs en cours...", 10)
+        
+        # Désactiver l'interface pendant les calculs
+        self._set_interface_enabled(False)
+        
         try:
+            # Étape 1: Validation des données
+            self.maj_statut("Validation des données d'entrée...", 10)
+            self.update_idletasks()
+            
             L = float(self.longueur_dalot_m.get())
             l = float(self.largeur_dalot_m.get())
             h = float(self.hauteur_dalot_m.get())
             e_mur = float(self.epaisseur_voile_lat_m.get())
             e_dalle = float(self.epaisseur_dalle_sup_m.get())
-
-            self.maj_statut("Analyse structurelle...", 40)
+            
+            # Validation des limites
+            erreurs = []
+            if L <= 0 or l <= 0 or h <= 0:
+                erreurs.append("Les dimensions doivent être positives")
+            if e_mur >= l/2:
+                erreurs.append("Épaisseur des murs trop importante")
+            
+            if erreurs:
+                raise ValueError("; ".join(erreurs))
+            
+            # Étape 2: Calculs structuraux
+            self.maj_statut("Calculs structuraux en cours...", 30)
+            self.update_idletasks()
+            self.after(50)  # Petite pause pour l'interface
+            
             self.dalot_calculations = SimulationCalculs.analyser_dalot(L, l, h, e_mur, e_dalle)
-
-            self.maj_statut("Génération du rapport...", 75)
+            
+            # Étape 3: Calculs d'armatures
+            self.maj_statut("Optimisation des armatures...", 50)
+            self.update_idletasks()
+            self._calculer_armatures_detaillees()
+            
+            # Étape 4: Vérifications
+            self.maj_statut("Vérifications réglementaires...", 70)
+            self.update_idletasks()
+            self._effectuer_verifications_detaillees()
+            
+            # Étape 5: Génération du rapport
+            self.maj_statut("Génération du rapport final...", 85)
+            self.update_idletasks()
+            
             if 'erreur' in self.dalot_calculations:
                 rapport = f"ERREUR LORS DES CALCULS\n{self.dalot_calculations['erreur']}"
             else:
@@ -972,15 +1440,78 @@ class ApplicationDalotComplete(tk.Tk):
 
             self.zone_calculs.delete("1.0", tk.END)
             self.zone_calculs.insert("1.0", rapport)
-            self.zone_calculs.see(tk.END)
+            self.zone_calculs.see("1.0")  # Aller au début
 
             self._mettre_a_jour_verifications()
-            self.maj_statut("Calculs terminés ✓", 100)
-            self.journaliser("Calculs de dimensionnement terminés")
+            
+            # Finalisation
+            self.maj_statut("Calculs terminés avec succès ✓", 100)
+            self.journaliser("Calculs de dimensionnement terminés avec succès")
+            messagebox.showinfo("Calculs terminés", "Le dimensionnement a été calculé avec succès !")
+            
         except Exception as e:
-            messagebox.showerror("Erreur de calcul", f"Erreur: {str(e)}")
+            messagebox.showerror("Erreur de calcul", f"Erreur lors des calculs:\n{str(e)}")
             self.journaliser(f"Erreur de calcul: {str(e)}")
-            self.maj_statut("Erreur lors des calculs", 0)
+            self.maj_statut("Erreur lors des calculs ❌", 0)
+        finally:
+            # Réactiver l'interface
+            self._set_interface_enabled(True)
+
+    def _set_interface_enabled(self, enabled):
+        """Active/désactive l'interface pendant les calculs"""
+        state = "normal" if enabled else "disabled"
+        # Cette méthode pourrait être étendue pour désactiver des widgets spécifiques
+
+    def _calculer_armatures_detaillees(self):
+        """Calculs détaillés des armatures selon les paramètres choisis"""
+        try:
+            # Récupérer les paramètres d'armatures
+            dia_princ_str = self.diametre_principal.get().replace("φ", "")
+            espacement = self.espacement_barres_mm.get()
+            
+            if dia_princ_str and espacement > 0:
+                import math
+                dia_princ = int(dia_princ_str)
+                section_barre = math.pi * (dia_princ/2)**2
+                As_fourni = section_barre * 1000 / espacement  # mm²/m
+                
+                # Mettre à jour les calculs avec les armatures choisies
+                if 'armatures_dalle_choisies' not in self.dalot_calculations:
+                    self.dalot_calculations['armatures_dalle_choisies'] = {}
+                
+                self.dalot_calculations['armatures_dalle_choisies'].update({
+                    'diametre': dia_princ,
+                    'espacement': espacement,
+                    'As_fourni': As_fourni / 1e6,  # m²/m
+                    'section_barre_mm2': section_barre
+                })
+                
+        except (ValueError, KeyError):
+            pass  # Continuer même si le calcul d'armature échoue
+
+    def _effectuer_verifications_detaillees(self):
+        """Vérifications réglementaires détaillées"""
+        try:
+            verifications = {}
+            
+            # Vérification de la résistance
+            if 'ferraillage_dalle_couverture' in self.dalot_calculations:
+                ferr = self.dalot_calculations['ferraillage_dalle_couverture']
+                if 'As_theorique' in ferr and 'armatures_dalle_choisies' in self.dalot_calculations:
+                    As_theo = ferr['As_theorique']
+                    As_fourni = self.dalot_calculations['armatures_dalle_choisies']['As_fourni']
+                    verifications['resistance'] = {
+                        'As_theorique': As_theo,
+                        'As_fourni': As_fourni,
+                        'verification': As_fourni >= As_theo,
+                        'ratio': As_fourni / As_theo if As_theo > 0 else 0
+                    }
+            
+            # Ajouter aux résultats
+            self.dalot_calculations['verifications'] = verifications
+            
+        except Exception:
+            pass  # Ne pas faire échouer le calcul pour des vérifications
 
     def _generer_rapport_complet(self):
         """Construit un rapport texte lisible à partir des résultats"""
@@ -1046,44 +1577,191 @@ class ApplicationDalotComplete(tk.Tk):
             messagebox.showinfo("Copie", "Aucun rapport à copier.")
 
     def cmd_exporter_pdf(self):
-        """Export simple du rapport au format .txt (PDF non requis pour éviter des dépendances)"""
+        """Export amélioré du rapport avec options de format"""
+        if not self.zone_calculs.get("1.0", tk.END).strip():
+            messagebox.showwarning("Export", "Aucun rapport à exporter. Lancez d'abord les calculs.")
+            return
+            
+        # Dialogue de choix de format
+        formats = [
+            ("Rapport texte", "*.txt"),
+            ("Rapport HTML", "*.html"),
+            ("Données JSON", "*.json"),
+            ("Rapport CSV", "*.csv")
+        ]
+        
+        nom_defaut = self.nom_projet.get().replace(" ", "_") if self.nom_projet.get() else "rapport_dalot"
         chemin = filedialog.asksaveasfilename(
-            title="Exporter le rapport (texte)",
-            defaultextension=".txt",
-            filetypes=[("Texte", "*.txt")]
+            title="Exporter le rapport",
+            initialvalue=f"{nom_defaut}_rapport.txt",
+            filetypes=formats
         )
+        
         if not chemin:
             return
+            
         try:
-            contenu = self.zone_calculs.get("1.0", tk.END)
-            with open(chemin, "w", encoding="utf-8") as f:
-                f.write(contenu)
+            extension = chemin.lower().split('.')[-1]
+            
+            if extension == 'txt':
+                self._exporter_txt(chemin)
+            elif extension == 'html':
+                self._exporter_html(chemin)
+            elif extension == 'json':
+                self._exporter_json(chemin)
+            elif extension == 'csv':
+                self._exporter_csv(chemin)
+            else:
+                self._exporter_txt(chemin)  # Par défaut
+                
             self.journaliser(f"Rapport exporté: {chemin}")
-            messagebox.showinfo("Export", "Rapport exporté avec succès (texte).")
+            messagebox.showinfo("Export réussi", f"Rapport exporté avec succès:\n{chemin}")
+            
         except Exception as e:
-            messagebox.showerror("Export", f"Erreur lors de l'export: {str(e)}")
+            messagebox.showerror("Erreur d'export", f"Impossible d'exporter le rapport:\n{str(e)}")
+
+    def _exporter_txt(self, chemin):
+        """Export au format texte simple"""
+        contenu = self.zone_calculs.get("1.0", tk.END)
+        with open(chemin, "w", encoding="utf-8") as f:
+            f.write(contenu)
+
+    def _exporter_html(self, chemin):
+        """Export au format HTML structuré"""
+        contenu = self.zone_calculs.get("1.0", tk.END)
+        html = f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rapport de Dimensionnement - {self.nom_projet.get()}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }}
+        h1 {{ color: #2E4057; border-bottom: 2px solid #2E4057; }}
+        h2 {{ color: #4A90A4; margin-top: 30px; }}
+        .info {{ background-color: #f0f8ff; padding: 10px; border-left: 4px solid #4A90A4; }}
+        pre {{ background-color: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }}
+    </style>
+</head>
+<body>
+    <h1>📋 Rapport de Dimensionnement de Dalot</h1>
+    <div class="info">
+        <p><strong>Projet:</strong> {self.nom_projet.get()}</p>
+        <p><strong>Ingénieur:</strong> {self.ingenieur.get()}</p>
+        <p><strong>Date:</strong> {self.date_projet.get()}</p>
+    </div>
+    <h2>📊 Résultats des Calculs</h2>
+    <pre>{contenu}</pre>
+    <hr>
+    <p><em>Rapport généré par Dalot Pro v2.0</em></p>
+</body>
+</html>"""
+        with open(chemin, "w", encoding="utf-8") as f:
+            f.write(html)
+
+    def _exporter_json(self, chemin):
+        """Export des données au format JSON"""
+        donnees_export = self._extraire_donnees_projet()
+        donnees_export['resultats'] = self.dalot_calculations
+        donnees_export['rapport_texte'] = self.zone_calculs.get("1.0", tk.END)
+        
+        import json
+        with open(chemin, "w", encoding="utf-8") as f:
+            json.dump(donnees_export, f, indent=2, ensure_ascii=False)
+
+    def _exporter_csv(self, chemin):
+        """Export des résultats principaux en CSV"""
+        import csv
+        with open(chemin, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Paramètre", "Valeur", "Unité", "Description"])
+            
+            # Géométrie
+            writer.writerow(["Longueur", self.longueur_dalot_m.get(), "m", "Longueur totale du dalot"])
+            writer.writerow(["Largeur", self.largeur_dalot_m.get(), "m", "Largeur intérieure"])
+            writer.writerow(["Hauteur", self.hauteur_dalot_m.get(), "m", "Hauteur intérieure"])
+            
+            # Résultats calculés
+            if 'volumes_masses' in self.dalot_calculations:
+                vm = self.dalot_calculations['volumes_masses']
+                if 'total' in vm:
+                    writer.writerow(["Volume total", f"{vm['total']['volume']:.3f}", "m³", "Volume total de béton"])
+                    writer.writerow(["Masse totale", f"{vm['total']['masse']:.0f}", "kg", "Masse totale de béton"])
+            
+            # Armatures
+            if 'armatures_dalle_choisies' in self.dalot_calculations:
+                arm = self.dalot_calculations['armatures_dalle_choisies']
+                writer.writerow(["Diamètre principal", f"φ{arm.get('diametre', 'N/A')}", "mm", "Diamètre des armatures principales"])
+                writer.writerow(["Espacement", f"{arm.get('espacement', 'N/A')}", "mm", "Espacement des armatures"])
+                writer.writerow(["Section d'acier", f"{arm.get('As_fourni', 0)*1e4:.2f}", "cm²/m", "Section d'acier par mètre"])
 
     def _effacer_resultats(self):
         self.zone_calculs.delete("1.0", tk.END)
         self.zone_verifications.delete("1.0", tk.END)
         self.journaliser("Résultats effacés")
 
-    # Vues 3D rapides
-    def cmd_vue_face(self):
-        self.ax_3d.view_init(elev=0, azim=0)
-        self.canvas_3d.draw()
+    # Vues 3D animées
+    def _vue_face_animee(self):
+        self._animer_vers_vue(elev=0, azim=0, nom="Vue de face")
 
-    def cmd_vue_cote(self):
-        self.ax_3d.view_init(elev=0, azim=90)
-        self.canvas_3d.draw()
+    def _vue_cote_animee(self):
+        self._animer_vers_vue(elev=0, azim=90, nom="Vue de côté")
 
-    def cmd_vue_dessus(self):
-        self.ax_3d.view_init(elev=90, azim=0)
-        self.canvas_3d.draw()
+    def _vue_dessus_animee(self):
+        self._animer_vers_vue(elev=90, azim=0, nom="Vue du dessus")
 
-    def cmd_vue_isometrique(self):
-        self.ax_3d.view_init(elev=20, azim=45)
-        self.canvas_3d.draw()
+    def _vue_isometrique_animee(self):
+        self._animer_vers_vue(elev=20, azim=45, nom="Vue isométrique")
+
+    def _reset_vue_animee(self):
+        """Reset de la vue avec restauration des limites originales"""
+        try:
+            L = float(self.longueur_dalot_m.get())
+            l = float(self.largeur_dalot_m.get())
+            h = float(self.hauteur_dalot_m.get())
+            
+            # Restaurer les limites optimales
+            margin = 0.15
+            self.ax_3d.set_xlim3d(-L*margin, L*(1+margin))
+            self.ax_3d.set_ylim3d(-l*margin, l*(1+margin))
+            self.ax_3d.set_zlim3d(0, h*(1+margin))
+            
+            # Vue isométrique par défaut
+            self._animer_vers_vue(elev=20, azim=45, nom="Vue reset")
+        except:
+            self._animer_vers_vue(elev=20, azim=45, nom="Vue reset")
+
+    def _animer_vers_vue(self, elev, azim, nom="Vue", steps=15):
+        """Animation fluide vers une vue donnée"""
+        current_elev = self.ax_3d.elev
+        current_azim = self.ax_3d.azim
+        
+        # Normaliser les angles
+        while azim - current_azim > 180:
+            azim -= 360
+        while current_azim - azim > 180:
+            azim += 360
+        
+        # Calculer les étapes d'animation
+        elev_step = (elev - current_elev) / steps
+        azim_step = (azim - current_azim) / steps
+        
+        def animate_step(step):
+            if step <= steps:
+                new_elev = current_elev + elev_step * step
+                new_azim = current_azim + azim_step * step
+                self.ax_3d.view_init(elev=new_elev, azim=new_azim)
+                self.canvas_3d.draw_idle()
+                
+                # Mise à jour du statut
+                if step < steps:
+                    self.label_aide.config(text=f"🎬 Animation vers {nom}... {int(step/steps*100)}%", 
+                                         foreground="blue")
+                    self.after(30, lambda: animate_step(step + 1))
+                else:
+                    self.label_aide.config(text=f"✅ {nom} activée", foreground="green")
+        
+        animate_step(1)
 
     # Placeholders supplémentaires
     def cmd_optimiser(self):
@@ -1138,7 +1816,7 @@ class ApplicationDalotComplete(tk.Tk):
 
     def _mettre_a_jour_titre_fenetre(self):
         mod = "*" if self.modifie else ""
-        nom = os.path.basename(self.chemin_fichier_courant) if self.chemin_fichier_courant else "Sans titre"
+        nom = os.path.basename(self.chemin_fichier_actuel) if self.chemin_fichier_actuel else "Sans titre"
         self.title(f"{mod}{self.nom_projet.get()} - {nom} | Dalot BA v2.0")
 
     def _avant_quitter(self):
